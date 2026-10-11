@@ -1,64 +1,41 @@
-﻿import express from 'express';
+import { createApp } from './app.js';
 import { pool } from './db.js';
+import { syncOverdueMaintenanceAlerts } from './maintenance.js';
 
-const app = express();
-const PORT = 3001;
+const host = process.env.HOST || '127.0.0.1';
+const port = Number(process.env.PORT || 3001);
+if (!host.trim() || !Number.isInteger(port) || port < 1 || port > 65535) {
+  throw new Error('HOST boş olamaz; PORT 1-65535 arasında olmalı.');
+}
 
-app.use(express.json());
-
-app.get('/api/health', (req, res) => {
-  res.json({ service: 'production-service', status: 'ok' });
+const app = createApp({ pool });
+const server = app.listen(port, host, () => {
+  console.log(`Üretim servisi: http://${host}:${port}`);
 });
+syncOverdueMaintenanceAlerts(pool).catch((error) => console.error('Bakım uyarıları yenilenemedi:', error.message));
+const overdueTimer = setInterval(() => {
+  syncOverdueMaintenanceAlerts(pool).catch((error) => console.error('Bakım uyarıları yenilenemedi:', error.message));
+}, 60_000);
+overdueTimer.unref();
 
-app.get('/api/machines', async (req, res) => {
+let closing = false;
+async function shutdown(signal) {
+  if (closing) return;
+  closing = true;
+  clearInterval(overdueTimer);
+  console.log(`${signal} alındı, bağlantılar kapatılıyor.`);
+  const timer = setTimeout(() => server.closeAllConnections(), 10_000);
+  timer.unref();
   try {
-    const result = await pool.query(
-      'SELECT id, code, name, status, created_at FROM machines ORDER BY id'
-    );
-    res.json(result.rows);
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await pool.end();
+    process.exitCode = 0;
   } catch (error) {
-    console.error(error);
-    res.status(503).json({ message: 'Makine kayıtlarına erişilemedi.' });
+    console.error('Kapatma hatası:', error);
+    process.exitCode = 1;
+  } finally {
+    clearTimeout(timer);
   }
-});
-
-app.post('/api/machines', async (req, res) => {
-  const body = req.body ?? {};
-  const code = typeof body.code === 'string'
-    ? body.code.trim().toUpperCase() : '';
-  const name = typeof body.name === 'string' ? body.name.trim() : '';
-  const status = body.status ?? 'idle';
-
-  if (!code || code.length > 30 || !name || name.length > 100) {
-    return res.status(400).json({
-      message: 'Kod (en fazla 30 karakter) ve makine adı (en fazla 100 karakter) gerekli.'
-    });
-  }
-
-  if (!['idle', 'running', 'maintenance'].includes(status)) {
-    return res.status(400).json({ message: 'Geçersiz makine durumu.' });
-  }
-
-  try {
-    const result = await pool.query(
-      `INSERT INTO machines (code, name, status)
-       VALUES ($1, $2, $3)
-       RETURNING id, code, name, status, created_at`,
-      [code, name, status]
-    );
-    res.status(201).json(result.rows[0]);
-  } catch (error) {
-    if (error.code === '23505') {
-      return res.status(409).json({
-        message: 'Bu makine kodu zaten kayıtlı.'
-      });
-    }
-
-    console.error(error);
-    res.status(503).json({ message: 'Makine kaydedilemedi.' });
-  }
-});
-
-app.listen(PORT, '127.0.0.1', () => {
-  console.log(`Üretim servisi: http://localhost:${PORT}`);
-});
+}
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));

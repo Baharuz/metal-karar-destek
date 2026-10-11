@@ -1,5 +1,15 @@
-# Vue 3 + Vite
+# Metal Karar Destek ön yüzü
 
-This template should help get you started developing with Vue 3 in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+Vue 3 + Vite arayüzü. API çağrıları varsayılan olarak aynı origin'deki `/api` yoluna gider.
 
-Learn more about IDE Support for Vue in the [Vue Docs Scaling up Guide](https://vuejs.org/guide/scaling-up/tooling.html#ide-support).
+```powershell
+Copy-Item .env.example .env
+npm ci
+npm run dev
+```
+
+Linux/macOS: `cp .env.example .env && npm ci && npm run dev`.
+
+`VITE_API_PROXY_TARGET` geliştirme ve `npm run preview` proxy hedefini belirler; varsayılan `http://127.0.0.1:3001`'dir. `npm run build` sonucu `dist/` dizinindedir. Docker kurulumunda nginx `/api` isteklerini API hizmetine iletir. Başka bir statik sunucu kullanılacaksa aynı `/api` yönlendirmesi kurulmalıdır.
+
+`VITE_API_BASE_URL` isteğe bağlıdır; boşken göreli `/api` kullanılır. Ayrı bir origin verilirse API'de uygun CORS ayarı gerekir. Yerel demo için önerilen kurulum aynı origin proxy'sidir.
